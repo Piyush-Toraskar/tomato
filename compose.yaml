@@ -1,0 +1,123 @@
+services:
+
+  db:
+    image: postgres:16-alpine
+
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-mini_uber}
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-mini_uber}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+    restart: unless-stopped
+
+
+  migrate:
+    build:
+      context: .
+
+    environment:
+      APP_ENV: development
+
+      DATABASE_URL: ""
+
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-mini_uber}
+
+      SECRET_KEY: ${SECRET_KEY}
+
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+
+      EXPOSE_DEBUG_TOKENS: ${EXPOSE_DEBUG_TOKENS:-true}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    command:
+      [
+        "alembic",
+        "upgrade",
+        "head"
+      ]
+
+    restart: "no"
+
+
+  api:
+    build:
+      context: .
+
+    environment:
+      APP_ENV: development
+
+      DATABASE_URL: ""
+
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-mini_uber}
+
+      SECRET_KEY: ${SECRET_KEY}
+
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+
+      EXPOSE_DEBUG_TOKENS: ${EXPOSE_DEBUG_TOKENS:-true}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+    depends_on:
+
+      db:
+        condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
+
+    ports:
+      - "8000:8000"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    restart: unless-stopped
+
+
+volumes:
+  postgres_data:

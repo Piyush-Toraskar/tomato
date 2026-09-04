@@ -3,12 +3,16 @@ from fastapi import (
     Response,
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     generate_latest,
 )
 
 from sqlalchemy import text
+
+from app.config import settings
 
 from app.database import (
     SessionLocal,
@@ -41,12 +45,43 @@ install_database_metrics(
 
 app = FastAPI(
     title="Mini Uber Eats Backend",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 
 app.add_middleware(
     RequestObservabilityMiddleware
+)
+
+
+app.add_middleware(
+    CORSMiddleware,
+
+    allow_origins=settings.cors_origin_list,
+
+    allow_credentials=False,
+
+    allow_methods=[
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "OPTIONS",
+    ],
+
+    allow_headers=[
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Request-ID",
+    ],
+
+    expose_headers=[
+        "X-Request-ID",
+    ],
+
+    max_age=600,
 )
 
 

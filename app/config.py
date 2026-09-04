@@ -1,6 +1,6 @@
 from pydantic_settings import (
     BaseSettings,
-    SettingsConfigDict
+    SettingsConfigDict,
 )
 
 from sqlalchemy.engine import URL
@@ -20,20 +20,26 @@ class Settings(BaseSettings):
     secret_key: str
 
     access_token_expire_minutes: int = 15
-
     refresh_token_expire_days: int = 7
-
     email_verification_expire_minutes: int = 60
-
     password_reset_expire_minutes: int = 30
 
     expose_debug_tokens: bool = True
+
+    rate_limit_enabled: bool = True
+
+    cors_origins: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173,"
+        "http://localhost:8080,"
+        "http://127.0.0.1:8080"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"
+        extra="ignore",
     )
 
     @property
@@ -47,12 +53,20 @@ class Settings(BaseSettings):
             password=self.db_password,
             host=self.db_host,
             port=self.db_port,
-            database=self.db_name
+            database=self.db_name,
         )
 
         return url.render_as_string(
-            hide_password=False
+            hide_password=False,
         )
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [
+            origin.strip().rstrip("/")
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
+        ]
 
 
 settings = Settings()

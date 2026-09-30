@@ -32,3 +32,9 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
+# Local secrets and generated frontend files
+.env
+frontend/.env
+frontend/node_modules/
+frontend/dist/
+Mini_Uber_Backend_Complete_Engineering_Report.pdf

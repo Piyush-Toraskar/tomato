@@ -28,6 +28,11 @@ class Settings(BaseSettings):
 
     rate_limit_enabled: bool = True
 
+    redis_url: str = "redis://localhost:6379/0"
+    kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_order_topic: str = "order-events"
+    kafka_consumer_group: str = "tomato-order-events"
+
     cors_origins: str = (
         "http://localhost:5173,"
         "http://127.0.0.1:5173,"

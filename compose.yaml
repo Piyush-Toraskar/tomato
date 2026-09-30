@@ -1,11 +1,14 @@
 services:
 
+  # ============================================================
+  # PostgreSQL
+  # ============================================================
   db:
     image: postgres:16-alpine
 
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tomato_dev_password}
       POSTGRES_DB: ${DB_NAME:-mini_uber}
 
     ports:
@@ -23,101 +26,228 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 5s
-
-    restart: unless-stopped
 
 
-  migrate:
-    build:
-      context: .
-
-    environment:
-      APP_ENV: development
-
-      DATABASE_URL: ""
-
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-mini_uber}
-
-      SECRET_KEY: ${SECRET_KEY}
-
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
-      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
-
-      EXPOSE_DEBUG_TOKENS: ${EXPOSE_DEBUG_TOKENS:-true}
-      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
-
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-
-    depends_on:
-      db:
-        condition: service_healthy
-
-    command:
-      [
-        "alembic",
-        "upgrade",
-        "head"
-      ]
-
-    restart: "no"
-
-
-  api:
-    build:
-      context: .
-
-    environment:
-      APP_ENV: development
-
-      DATABASE_URL: ""
-
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-mini_uber}
-
-      SECRET_KEY: ${SECRET_KEY}
-
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
-      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
-
-      EXPOSE_DEBUG_TOKENS: ${EXPOSE_DEBUG_TOKENS:-true}
-      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
-
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-
-    depends_on:
-
-      db:
-        condition: service_healthy
-
-      migrate:
-        condition: service_completed_successfully
+  # ============================================================
+  # Redis
+  # ============================================================
+  redis:
+    image: redis:7-alpine
 
     ports:
-      - "8000:8000"
+      - "6379:6379"
 
     healthcheck:
       test:
         [
           "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"
+          "redis-cli",
+          "ping"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+
+  # ============================================================
+  # Kafka - Single Node KRaft
+  # ============================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+
+    hostname: kafka
+
+    ports:
+      - "9092:9092"
+
+    environment:
+
+      # --------------------------------------------------------
+      # KRaft
+      # --------------------------------------------------------
+      KAFKA_NODE_ID: 1
+
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+
+      # --------------------------------------------------------
+      # Kafka listeners
+      # --------------------------------------------------------
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: >-
+        CONTROLLER:PLAINTEXT,
+        PLAINTEXT:PLAINTEXT,
+        PLAINTEXT_HOST:PLAINTEXT
+
+      KAFKA_LISTENERS: >-
+        PLAINTEXT://0.0.0.0:29092,
+        CONTROLLER://0.0.0.0:29093,
+        PLAINTEXT_HOST://0.0.0.0:9092
+
+      KAFKA_ADVERTISED_LISTENERS: >-
+        PLAINTEXT://kafka:29092,
+        PLAINTEXT_HOST://localhost:9092
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+
+      # --------------------------------------------------------
+      # Single-node settings
+      # --------------------------------------------------------
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+
+      # --------------------------------------------------------
+      # Storage
+      # --------------------------------------------------------
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+
+    networks:
+      default:
+        aliases:
+          - kafka
+
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "nc -z localhost 9092 || exit 1"
         ]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
-
-    restart: unless-stopped
+      retries: 10
 
 
+  # ============================================================
+  # FastAPI Backend
+  # ============================================================
+  api:
+    build: .
+
+    # Four Uvicorn workers so the API can use multiple CPU cores.
+    command: >
+      sh -c "
+      alembic upgrade head &&
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 4
+      "
+
+    environment:
+
+      # --------------------------------------------------------
+      # Application
+      # --------------------------------------------------------
+      APP_ENV: development
+
+
+      # --------------------------------------------------------
+      # PostgreSQL
+      # --------------------------------------------------------
+      DB_USER: ${DB_USER:-postgres}
+
+      DB_PASSWORD: ${DB_PASSWORD:-tomato_dev_password}
+
+      DB_HOST: db
+
+      DB_PORT: 5432
+
+      DB_NAME: ${DB_NAME:-mini_uber}
+
+
+      # --------------------------------------------------------
+      # Authentication
+      # --------------------------------------------------------
+      SECRET_KEY: ${SECRET_KEY:-change-this-in-production}
+
+
+      # --------------------------------------------------------
+      # Redis
+      # --------------------------------------------------------
+      REDIS_URL: redis://redis:6379/0
+
+
+      # --------------------------------------------------------
+      # Kafka
+      # --------------------------------------------------------
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+
+      KAFKA_ORDER_TOPIC: order-events
+
+      KAFKA_CONSUMER_GROUP: tomato-order-events
+
+
+      # --------------------------------------------------------
+      # CORS
+      # --------------------------------------------------------
+      CORS_ORIGINS: >-
+        http://localhost:5173,
+        http://127.0.0.1:5173,
+        http://localhost:8080
+
+
+    depends_on:
+
+      db:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+      kafka:
+        condition: service_healthy
+
+
+    ports:
+      - "8000:8000"
+
+
+  # ============================================================
+  # React Frontend
+  # ============================================================
+  frontend:
+
+    build:
+      context: ./frontend
+
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+
+
+    depends_on:
+      - api
+
+
+    ports:
+      - "8080:80"
+
+
+# ==============================================================
+# Volumes
+# ==============================================================
 volumes:
+
   postgres_data:
+
+
+# ==============================================================
+# Networks
+# ==============================================================
+networks:
+
+  default:
+    driver: bridge

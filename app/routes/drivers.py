@@ -12,6 +12,7 @@ from app.database import get_db
 from app.helpers import get_driver_for_account
 from app.security import get_current_account
 from app.services import driver_service
+from app.redis_client import redis_client
 
 
 router = APIRouter(
@@ -82,7 +83,7 @@ def get_my_driver_profile(
     "/driver/location",
     response_model=schemas.DriverLocationResponse
 )
-def update_driver_location(
+async def update_driver_location(
     location: schemas.LocationUpdate,
 
     current_account: models.Account
@@ -90,11 +91,14 @@ def update_driver_location(
 
     db: Session = Depends(get_db)
 ):
-    return driver_service.update_location(
-        db,
-        current_account,
-        location
+    updated = driver_service.update_location(
+        db, current_account, location
     )
+    driver = get_driver_for_account(db, current_account)
+    await redis_client.update_driver_geo(
+        driver.id, updated.latitude, updated.longitude
+    )
+    return updated
 
 
 @router.patch(

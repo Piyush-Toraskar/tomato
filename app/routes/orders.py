@@ -12,6 +12,7 @@ from app import models, schemas
 from app.database import get_db
 from app.security import get_current_account
 from app.services import order_service
+from app.kafka_client import kafka_producer
 
 
 router = APIRouter(
@@ -24,7 +25,7 @@ router = APIRouter(
     response_model=schemas.OrderResponse,
     status_code=status.HTTP_201_CREATED
 )
-def create_order(
+async def create_order(
     order: schemas.OrderCreate,
 
     idempotency_key: str = Header(
@@ -39,12 +40,17 @@ def create_order(
 
     db: Session = Depends(get_db)
 ):
-    return order_service.create_order(
-        db,
-        current_account,
-        order,
-        idempotency_key
+    created = order_service.create_order(
+        db, current_account, order, idempotency_key
     )
+    await kafka_producer.send_order_event(
+        "order_created", created.id,
+        restaurant_id=created.restaurant_id,
+        customer_id=created.user_id,
+        status=created.status,
+        total_amount=str(created.total_amount),
+    )
+    return created
 
 
 @router.get(
@@ -122,7 +128,7 @@ def get_order(
     "/orders/{order_id}/status",
     response_model=schemas.OrderResponse
 )
-def update_order_status(
+async def update_order_status(
     order_id: int,
 
     status_update: schemas.OrderStatusUpdate,
@@ -132,12 +138,13 @@ def update_order_status(
 
     db: Session = Depends(get_db)
 ):
-    return order_service.update_order_status(
-        db,
-        current_account,
-        order_id,
-        status_update
+    updated = order_service.update_order_status(
+        db, current_account, order_id, status_update
     )
+    await kafka_producer.send_order_event(
+        "order_status_changed", updated.id, status=updated.status
+    )
+    return updated
 
 
 @router.post(
@@ -145,7 +152,7 @@ def update_order_status(
     response_model=schemas.DriverAssignmentResponse,
     status_code=status.HTTP_201_CREATED
 )
-def assign_driver(
+async def assign_driver(
     order_id: int,
 
     current_account: models.Account
@@ -153,11 +160,13 @@ def assign_driver(
 
     db: Session = Depends(get_db)
 ):
-    return order_service.assign_driver_to_order(
-        db,
-        current_account,
-        order_id
+    assignment = order_service.assign_driver_to_order(
+        db, current_account, order_id
     )
+    await kafka_producer.send_order_event(
+        "driver_assigned", order_id, driver_id=assignment["driver_id"]
+    )
+    return assignment
 
 
 @router.get(
